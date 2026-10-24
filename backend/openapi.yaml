@@ -1,0 +1,129 @@
+openapi: 3.0.3
+info:
+  title: Trade anomaly detection API
+  version: 1.0.0
+  description: >
+    API of the trade anomaly platform (HES-SO CloudSys, project 3, group 16).
+    Every route requires a Cognito token in the Authorization header ("Bearer <token>").
+    This file documents the contract; the routes themselves are deployed by template.yaml.
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    variables:
+      apiId: { default: replace-with-ApiUrl-output }
+      region: { default: us-east-1 }
+security:
+  - cognito: []
+paths:
+  /anomalies:
+    get:
+      summary: Heatmap of one exporter and one product
+      description: Top 10 partners (by declared trade value) x periods, one cell per partner and period.
+      parameters:
+        - { name: exporter, in: query, required: true, schema: { $ref: "#/components/schemas/Exporter" } }
+        - { name: hs4, in: query, required: true, schema: { $ref: "#/components/schemas/Product" } }
+        - { name: freq, in: query, required: false, schema: { $ref: "#/components/schemas/Frequency" } }
+      responses:
+        "200":
+          description: Heatmap data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exporter: { type: string }
+                  hs4: { type: string }
+                  freq: { type: string }
+                  partners: { type: array, items: { type: string }, description: Rows, largest partner first }
+                  periods: { type: array, items: { type: string }, description: Columns, oldest first }
+                  cells: { type: array, items: { $ref: "#/components/schemas/Cell" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { description: Missing or invalid token }
+  /reports:
+    post:
+      summary: Request the AI report of one flagged cell
+      description: >
+        Starts the report workflow and returns at once (202). The report id is derived from the
+        anomaly, so asking twice for the same cell never generates two reports.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [exporter, partner, hs4, freq, period]
+              properties:
+                exporter: { $ref: "#/components/schemas/Exporter" }
+                partner: { type: string, example: MEX, description: ISO3 code }
+                hs4: { $ref: "#/components/schemas/Product" }
+                freq: { $ref: "#/components/schemas/Frequency" }
+                period: { type: string, example: 2024-Q3, description: "YYYY-MM, YYYY-Qn or YYYY, matching freq" }
+      responses:
+        "202":
+          description: Workflow started (or already started)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /reports/{reportId}:
+    get:
+      summary: Status of a report, with a download link once generated
+      description: Poll this route after POST /reports until the status is generated or failed.
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, example: USA-MEX-1005-Q-2024-Q3 }
+      responses:
+        "200":
+          description: Report status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest:
+      description: Invalid parameters
+      content:
+        application/json:
+          schema: { type: object, properties: { error: { type: string } } }
+  schemas:
+    Exporter:
+      type: string
+      enum: [ARG, AUS, BRA, CAN, FRA, KAZ, ROU, RUS, UKR, USA]
+    Product:
+      type: string
+      enum: ["1001", "1003", "1005", "1201", "1205", "1206", "2304"]
+      description: 1001 wheat, 1003 barley, 1005 corn, 1201 soybeans, 1205 rapeseed, 1206 sunflower seed, 2304 soybean meal
+    Frequency:
+      type: string
+      enum: [M, Q, Y]
+      default: M
+    Cell:
+      type: object
+      properties:
+        partner: { type: string }
+        period: { type: string }
+        status:
+          type: string
+          enum: [ok, anomaly_fob_above_cif, anomaly_gap_above_threshold, one_sided]
+          description: one_sided = declared by one country only, no gap can be computed
+        fob_usd_t: { type: number, description: Unit price declared by the exporter (USD per tonne) }
+        cif_usd_t: { type: number, description: Unit price declared by the importer (USD per tonne) }
+        gap: { type: number, description: "(CIF - FOB) / FOB. Absent when the FOB price is zero (infinite gap, flagged above the threshold)." }
+        fob_value_usd: { type: number }
+        cif_value_usd: { type: number }
+        months: { type: integer, description: Months declared on both sides in the period }
+    ReportStatus:
+      type: object
+      properties:
+        reportId: { type: string }
+        status: { type: string, enum: [not_generated, in_progress, failed, generated] }
+        downloadUrl: { type: string, description: Signed link to the PDF, valid 15 minutes (generated only) }
+        error: { type: string, description: failed only }
+        cause: { type: string, description: failed only }
