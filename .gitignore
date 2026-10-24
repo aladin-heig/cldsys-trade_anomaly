@@ -1,0 +1,16 @@
+# SAM build output
+.aws-sam/
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# Secrets never go in the repository (the Comtrade key lives in Parameter Store)
+.env
+*.pem
+# Windows download markers
+*:Zone.Identifier
+# Front-end
+node_modules/
+frontend/dist/
+.env.local
