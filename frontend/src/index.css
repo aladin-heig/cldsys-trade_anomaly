@@ -1,0 +1,348 @@
+:root {
+  --ink: #1d2433;
+  --quiet: #5f6b7a;
+  --rule: #c9ced6;
+  --panel: #f3f4f6;
+  --blue: #1565c0;
+  --red: #e53935;
+  --none: #f7f8fa;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: #ffffff;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 24px 40px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.topbar h1 {
+  font-size: 1.35rem;
+  margin: 0;
+}
+
+.user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--quiet);
+  font-size: 0.9rem;
+}
+
+.user button,
+.close {
+  border: 1px solid var(--rule);
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.panel {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+/* Configuration panel: three drop-downs and the blue button, as on the project brief. */
+.config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.config label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--quiet);
+}
+
+.config select {
+  min-width: 170px;
+  padding: 9px 12px;
+  font-size: 0.95rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.config .show {
+  padding: 10px 28px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--blue);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.config .show:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Heatmap: partners in rows, periods in columns. */
+.heatmap-scroll {
+  overflow-x: auto;
+}
+
+.heatmap {
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 0.85rem;
+}
+
+.heatmap th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.heatmap thead th {
+  padding: 2px 4px;
+  text-align: center;
+}
+
+.heatmap .sub {
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: var(--quiet);
+}
+
+/* Row labels stay visible while scrolling: above the cells (which are positioned too),
+   and the shadow fills the border-spacing gaps so no cell shows through between labels. */
+.heatmap .partner,
+.heatmap .corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 0 0 0 3px #fff;
+}
+
+.heatmap .partner {
+  text-align: left;
+  font-weight: 400;
+  padding-right: 12px;
+}
+
+.cell {
+  position: relative; /* keeps the screen-reader label inside the cell */
+  height: 26px;
+  min-width: 56px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: #fff;
+}
+
+.freq-Q .cell {
+  min-width: 22px;
+}
+
+.freq-M .cell {
+  min-width: 12px;
+  height: 22px;
+}
+
+.cell.none {
+  background: var(--none);
+  border-style: dashed;
+}
+
+.cell.anomaly {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+/* Flow declared by one country only: still an anomaly, hatched to tell it from a price gap. */
+.cell.anomaly.one-sided,
+.swatch.anomaly.one-sided {
+  background: repeating-linear-gradient(135deg, var(--red) 0 3px, #ef9a9a 3px 6px);
+}
+
+.cell.anomaly button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cell.anomaly:hover,
+.cell.selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  font-size: 0.8rem;
+  color: var(--quiet);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+
+.swatch.ok {
+  background: #fff;
+}
+.swatch.anomaly {
+  background: var(--red);
+  border-color: var(--red);
+}
+.swatch.none {
+  background: var(--none);
+  border-style: dashed;
+}
+
+/* Report panel, opened by a click on a red cell. */
+.report-panel {
+  width: 340px;
+  flex-shrink: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 16px 20px 20px;
+  position: sticky;
+  top: 16px;
+}
+
+.report-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.report-panel h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.cause {
+  font-size: 0.9rem;
+  color: var(--red);
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  font-size: 0.9rem;
+  margin: 12px 0 16px;
+}
+
+.figures dt {
+  color: var(--quiet);
+}
+
+.figures dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+  font-size: 0.9rem;
+}
+
+.download {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 9px 16px;
+  color: #fff;
+  background: var(--blue);
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--rule);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  color: #b71c1c;
+}
+
+.hint,
+.empty {
+  color: var(--quiet);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    flex-direction: column;
+  }
+  .report-panel {
+    width: auto;
+    position: static;
+  }
+}
