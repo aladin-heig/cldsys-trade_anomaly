@@ -62,11 +62,11 @@ def write(cells, weights):
                 "period": c["period"],
                 "status": c["status"],
             }
-            if c["status"] != "one_sided":
-                for field in ("fob_usd_t", "cif_usd_t", "gap", "fob_value_usd", "cif_value_usd"):
-                    if c[field] is not None:  # no gap when the FOB price is zero
-                        item[field] = dec(c[field])
-                item["months"] = c["months"]
+            for field in ("fob_usd_t", "cif_usd_t", "gap", "fob_value_usd", "cif_value_usd"):
+                # No gap when the FOB price is zero or the flow is one-sided; no price on the silent side.
+                if c[field] is not None:
+                    item[field] = dec(c[field])
+            item["fob_months"], item["cif_months"] = c["fob_months"], c["cif_months"]
             batch.put_item(Item=item)
         for (exporter, hs4, year), partners in weights.items():
             batch.put_item(Item={

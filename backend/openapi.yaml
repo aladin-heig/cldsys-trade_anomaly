@@ -53,17 +53,26 @@ paths:
               required: [exporter, partner, hs4, freq, period]
               properties:
                 exporter: { $ref: "#/components/schemas/Exporter" }
-                partner: { type: string, example: MEX, description: ISO3 code }
+                partner: { type: string, example: CAN, description: ISO3 code }
                 hs4: { $ref: "#/components/schemas/Product" }
                 freq: { $ref: "#/components/schemas/Frequency" }
-                period: { type: string, example: 2024-Q3, description: "YYYY-MM, YYYY-Qn or YYYY, matching freq" }
+                period: { type: string, example: 2025-03, description: "YYYY-MM, YYYY-Qn or YYYY, matching freq" }
       responses:
         "202":
           description: Workflow started (or already started)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReportStatus" }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          description: Invalid parameters, or the cell is not an anomaly (within the threshold)
+          content:
+            application/json:
+              schema: { type: object, properties: { error: { type: string } } }
+        "404":
+          description: No data for this exporter, partner, product and period
+          content:
+            application/json:
+              schema: { type: object, properties: { error: { type: string } } }
   /reports/{reportId}:
     get:
       summary: Status of a report, with a download link once generated
@@ -72,7 +81,7 @@ paths:
         - name: reportId
           in: path
           required: true
-          schema: { type: string, example: USA-MEX-1005-Q-2024-Q3 }
+          schema: { type: string, example: USA-CAN-1001-M-2025-03 }
       responses:
         "200":
           description: Report status
@@ -111,14 +120,17 @@ components:
         period: { type: string }
         status:
           type: string
-          enum: [ok, anomaly_fob_above_cif, anomaly_gap_above_threshold, one_sided]
-          description: one_sided = declared by one country only, no gap can be computed
+          enum: [ok, anomaly_fob_above_cif, anomaly_gap_above_threshold, anomaly_one_sided]
+          description: >
+            anomaly_one_sided = flow declared by one country only: a legitimate transaction, flagged so that
+            a report can explain it. Only the declaring side's fields are present, and there is no gap.
         fob_usd_t: { type: number, description: Unit price declared by the exporter (USD per tonne) }
         cif_usd_t: { type: number, description: Unit price declared by the importer (USD per tonne) }
         gap: { type: number, description: "(CIF - FOB) / FOB. Absent when the FOB price is zero (infinite gap, flagged above the threshold)." }
         fob_value_usd: { type: number }
         cif_value_usd: { type: number }
-        months: { type: integer, description: Months declared on both sides in the period }
+        fob_months: { type: integer, description: Months of the period declared by the exporter }
+        cif_months: { type: integer, description: Months of the period declared by the importer }
     ReportStatus:
       type: object
       properties:

@@ -95,6 +95,12 @@ def start_report(event):
     if error:
         return respond(400, {"error": error})
     exporter, partner, hs4, freq, period = fields
+    # Only a red cell has a report (one-sided flows included): a consistent cell has nothing to explain.
+    cell = table.get_item(Key={"pk": f"{exporter}#{hs4}#{freq}", "sk": f"{period}#{partner}"}).get("Item")
+    if cell is None:
+        return respond(404, {"error": "no data for this cell"})
+    if not cell["status"].startswith("anomaly"):
+        return respond(400, {"error": f"this cell is not an anomaly (status {cell['status']})"})
     report_id = f"{exporter}-{partner}-{hs4}-{freq}-{period}"
     request = {"reportId": report_id, "exporter": exporter, "partner": partner, "hs4": hs4, "freq": freq, "period": period}
     try:

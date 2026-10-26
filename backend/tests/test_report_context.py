@@ -18,12 +18,12 @@ def cell(partner, period, status="ok", **extra):
 def test_select_splits_anomaly_history_and_peers():
     cells = [
         cell("EGY", "2024-01"), cell("EGY", "2024-02", "anomaly_fob_above_cif"), cell("EGY", "2024-03"),
-        cell("MAR", "2024-02"), cell("DZA", "2024-02", "one_sided"),
+        cell("MAR", "2024-02"), cell("DZA", "2024-02", "anomaly_one_sided"),
     ]
     anomaly, history, peers = trade_context.select(cells, "EGY", "2024-02")
     assert anomaly["status"] == "anomaly_fob_above_cif"
     assert [c["period"] for c in history] == ["2024-01", "2024-02"]  # nothing after the flagged period
-    assert [c["partner"] for c in peers] == ["MAR"]                  # one-sided flows have no price to compare
+    assert [c["partner"] for c in peers] == ["MAR", "DZA"]           # one-sided peers say who stopped declaring
     assert isinstance(anomaly["gap"], float) and "pk" not in anomaly  # plain JSON for the model
 
 

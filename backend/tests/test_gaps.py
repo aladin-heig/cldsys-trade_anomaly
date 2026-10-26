@@ -51,17 +51,21 @@ def test_quarter_sums_values_and_quantities_before_dividing():
     q = cell(cells, "Q", "2023-Q1")
     assert q["fob_usd_t"] == pytest.approx(1_000_000 / 3100)
     assert q["cif_usd_t"] == pytest.approx(1_100_000 / 3100)
-    assert q["months"] == 2
+    assert (q["fob_months"], q["cif_months"]) == (2, 2)
 
 
-def test_month_declared_on_one_side_is_kept_out_of_the_quarter():
+def test_month_declared_on_one_side_counts_in_the_quarter():
+    # DNEXT's note: a row that appears on one side only is still a legitimate transaction.
     cells, _ = gaps.compute([
         row("2023-01", "FRA", "Export", "EGY", 400_000, 1000), row("2023-01", "EGY", "Import", "FRA", 440_000, 1000),
-        row("2023-02", "FRA", "Export", "EGY", 400_000, 1000),  # no mirror import
+        row("2023-02", "FRA", "Export", "EGY", 1_000_000, 1000),  # no mirror import
     ], EXPORTERS)
-    assert cell(cells, "M", "2023-02")["status"] == "one_sided"
-    assert cell(cells, "Q", "2023-Q1")["months"] == 1
-    assert cell(cells, "Q", "2023-Q1")["gap"] == pytest.approx(0.10)
+    assert cell(cells, "M", "2023-02")["status"] == "anomaly_one_sided"
+    q = cell(cells, "Q", "2023-Q1")
+    assert (q["fob_months"], q["cif_months"]) == (2, 1)
+    assert q["fob_usd_t"] == 700        # (400,000 + 1,000,000) / 2,000 t, February included
+    assert q["cif_usd_t"] == 440
+    assert q["status"] == "anomaly_fob_above_cif"
 
 
 def test_imports_from_a_country_outside_the_scope_are_ignored():
@@ -109,18 +113,23 @@ def test_missing_quantity_gives_no_unit_price():
         row("2023-01", "FRA", "Export", "EGY", 400_000, float("nan")),
         row("2023-01", "EGY", "Import", "FRA", 440_000, 1000),
     ], EXPORTERS)
-    assert cell(cells, "M", "2023-01")["status"] == "one_sided"
+    assert cell(cells, "M", "2023-01")["status"] == "anomaly_one_sided"
 
 
-def test_flow_declared_on_one_side_only_is_never_an_anomaly():
-    # DNEXT's note: Russia stopped reporting exports after 2021-12; partners' imports remain legitimate.
+def test_flow_declared_on_one_side_only_is_flagged_with_the_declared_side():
+    # DNEXT's note: Russia stopped reporting exports after 2021-12; partners' imports remain legitimate,
+    # so they are kept, and flagged at every frequency for a report to explain them.
     cells, weights = gaps.compute([
         row("2022-03", "EGY", "Import", "RUS", 900_000, 1000),
         row("2022-05", "EGY", "Import", "RUS", 900_000, 1000),
     ], {"RUS"})
     statuses = {(c["freq"], c["period"]): c["status"] for c in cells if c["partner"] == "EGY"}
-    assert statuses == {("M", "2022-03"): "one_sided", ("M", "2022-05"): "one_sided",
-                        ("Q", "2022-Q1"): "one_sided", ("Q", "2022-Q2"): "one_sided", ("Y", "2022"): "one_sided"}
+    assert statuses == {("M", "2022-03"): "anomaly_one_sided", ("M", "2022-05"): "anomaly_one_sided",
+                        ("Q", "2022-Q1"): "anomaly_one_sided", ("Q", "2022-Q2"): "anomaly_one_sided",
+                        ("Y", "2022"): "anomaly_one_sided"}
+    year = cell(cells, "Y", "2022")
+    assert (year["cif_value_usd"], year["cif_usd_t"]) == (1_800_000, 900)  # the importer's two months
+    assert (year["fob_value_usd"], year["fob_usd_t"], year["gap"]) == (None, None, None)
     assert weights[("RUS", "1001", "2022")] == {"EGY": 1_800_000}
 
 
@@ -140,6 +149,19 @@ def test_row_with_zero_quantity_is_ignored_and_the_other_side_kept():
         row("2023-01", "FRA", "Export", "EGY", 400_000, 0),       # ignored
         row("2023-01", "EGY", "Import", "FRA", 440_000, 1000),   # kept, legitimate one-sided flow
     ], EXPORTERS)
-    assert cell(cells, "M", "2023-01")["status"] == "one_sided"
-    assert cell(cells, "Y", "2023")["status"] == "one_sided"
+    assert cell(cells, "M", "2023-01")["status"] == "anomaly_one_sided"
+    assert cell(cells, "Y", "2023")["status"] == "anomaly_one_sided"
     assert weights[("FRA", "1001", "2023")] == {"EGY": 440_000}
+
+
+def test_export_and_import_in_different_months_are_compared_in_the_quarter():
+    # January exported but not imported, February imported but not exported: two one-sided months,
+    # but the quarter has a price on each side.
+    cells, _ = gaps.compute([
+        row("2023-01", "FRA", "Export", "EGY", 400_000, 1000),
+        row("2023-02", "EGY", "Import", "FRA", 900_000, 1000),
+    ], EXPORTERS)
+    assert {cell(cells, "M", m)["status"] for m in ("2023-01", "2023-02")} == {"anomaly_one_sided"}
+    q = cell(cells, "Q", "2023-Q1")
+    assert (q["fob_usd_t"], q["cif_usd_t"], q["gap"]) == (400, 900, 1.25)
+    assert q["status"] == "anomaly_gap_above_threshold"

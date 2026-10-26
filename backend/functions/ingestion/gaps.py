@@ -2,7 +2,7 @@
 
 unit price = value / quantity          (USD per tonne)
 gap        = (CIF - FOB) / FOB
-anomaly    = FOB > CIF  or  gap > 35 %
+anomaly    = FOB > CIF  or  gap > 35 %  or  flow declared by one country only
 
 A zero FOB price with a non-zero CIF price makes the gap tend to infinity: flagged as above the
 threshold, with no gap value. Both prices at zero: nothing to compare, not flagged.
@@ -57,37 +57,35 @@ def compute(rows, exporters):
             key = (r["partner"], r["reporter"], r["hs4"], r["ym"])
             imports[key] = (r["value_usd"], r["qty_t"])
 
-    # Sum each side separately. Quarters and years only aggregate the months declared on both
-    # sides, so that a month missing on one side does not create an artificial gap.
-    sums = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0])  # fob value, fob qty, cif value, cif qty, months
-    # Every period with at least one declared row. Per DNEXT's notes, a flow declared on one side only
-    # (e.g. Russian exports after 2021-12, seen only through partners' imports) is a legitimate
-    # transaction: it is shown as "one_sided", never as an anomaly, at every frequency.
-    declared = set()
+    # Sum each side separately, over every month it declared. Per DNEXT's notes, a row that appears on
+    # one side only (e.g. Russian exports after 2021-12, seen only through partners' imports) is a
+    # legitimate transaction: a quarter or a year counts it even if the other side has no row that month.
+    # Unit prices stay comparable when the two sides cover different months, since both are per tonne.
+    # A period where only one side declared anything is flagged as "anomaly_one_sided", with that side's
+    # totals, so that a report can explain it.
+    sums = defaultdict(lambda: [0.0, 0.0, 0, 0.0, 0.0, 0])  # fob value, qty, months, cif value, qty, months
     for key in exports.keys() | imports.keys():
         exporter, partner, hs4, ym = key
-        periods = [(exporter, partner, hs4, freq, period_of(ym, freq)) for freq in FREQUENCIES]
-        declared.update(periods)
         fob, cif = exports.get(key), imports.get(key)
-        if not fob or not cif:
-            continue
-        for period_key in periods:
-            s = sums[period_key]
-            s[0] += fob[0]; s[1] += fob[1]; s[2] += cif[0]; s[3] += cif[1]; s[4] += 1
+        for freq in FREQUENCIES:
+            s = sums[(exporter, partner, hs4, freq, period_of(ym, freq))]
+            if fob:
+                s[0] += fob[0]; s[1] += fob[1]; s[2] += 1
+            if cif:
+                s[3] += cif[0]; s[4] += cif[1]; s[5] += 1
 
     cells = []
-    for (exporter, partner, hs4, freq, period), (fv, fq, cv, cq, months) in sums.items():
-        fob_price, cif_price = fv / fq, cv / cq
-        gap, status = classify(fob_price, cif_price)
+    for (exporter, partner, hs4, freq, period), (fv, fq, fm, cv, cq, cm) in sums.items():
+        fob_price, cif_price = (fv / fq if fq else None), (cv / cq if cq else None)
+        if fob_price is None or cif_price is None:
+            gap, status = None, "anomaly_one_sided"
+        else:
+            gap, status = classify(fob_price, cif_price)
         cells.append({
             "exporter": exporter, "partner": partner, "hs4": hs4, "freq": freq, "period": period,
             "fob_usd_t": fob_price, "cif_usd_t": cif_price, "gap": gap, "status": status,
-            "fob_value_usd": fv, "cif_value_usd": cv, "months": months,
-        })
-    for exporter, partner, hs4, freq, period in declared - sums.keys():
-        cells.append({
-            "exporter": exporter, "partner": partner, "hs4": hs4, "freq": freq, "period": period,
-            "status": "one_sided",
+            "fob_value_usd": fv if fq else None, "cif_value_usd": cv if cq else None,
+            "fob_months": fm, "cif_months": cm,
         })
 
     # Trade weight of each partner per year, used to pick the top partners shown on the heatmap.

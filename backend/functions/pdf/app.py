@@ -3,6 +3,7 @@
 The PDF's presence in S3 is what marks the report as generated for the read function.
 """
 import io
+import math
 import os
 
 import boto3
@@ -19,6 +20,7 @@ FONT_DIR = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
 STATUS_LABELS = {
     "anomaly_fob_above_cif": "FOB supérieur au CIF",
     "anomaly_gap_above_threshold": "écart supérieur à 35 %",
+    "anomaly_one_sided": "flux déclaré par un seul pays",
     "ok": "cohérent",
 }
 LIKELIHOOD = {"faible": "faible", "moyenne": "moyenne", "elevee": "élevée"}
@@ -27,6 +29,8 @@ CAUSES = {
     "conflit": "Conflit",
     "tarifs_sanctions": "Tarifs ou sanctions",
     "erreur_declaration": "Erreur de déclaration",
+    "absence_declaration": "Absence de déclaration d'un pays",
+    "decalage_temporel": "Décalage dans le temps entre les deux déclarations",
     "autre": "Autre cause",
 }
 
@@ -40,12 +44,33 @@ def usd(x):
     return f"{x:,.0f}".replace(",", " ")  # thin space as thousands separator
 
 
+def figures(a, exporter, partner):
+    """One sentence with the cell's prices; a one-sided cell only has the side that declared."""
+    if a["status"] != "anomaly_one_sided":
+        text = (
+            f"Prix FOB {usd(a['fob_usd_t'])} USD/t, prix CIF {usd(a['cif_usd_t'])} USD/t, "
+            f"écart {gap_text(a.get('gap'))} ({STATUS_LABELS.get(a['status'], a['status'])})."
+        )
+        # Quarter or year: each side counts every month it declared, which may differ.
+        if a.get("fob_months") != a.get("cif_months"):
+            text += f" Mois déclarés : {a['fob_months']} à l'export, {a['cif_months']} à l'import."
+        return text
+    if "fob_usd_t" in a:
+        declared = f"{exporter} déclare une exportation de {usd(a['fob_value_usd'])} USD ({usd(a['fob_usd_t'])} USD/t FOB)"
+        silent = partner
+    else:
+        declared = f"{partner} déclare une importation de {usd(a['cif_value_usd'])} USD ({usd(a['cif_usd_t'])} USD/t CIF)"
+        silent = exporter
+    return f"Flux déclaré par un seul pays : {declared} ; {silent} ne déclare pas ce flux. Aucun écart ne peut être calculé."
+
+
 def chart(history, period):
-    points = [c for c in history if c["status"] != "one_sided"]
+    # A one-sided period has a single price: the missing one is left as a gap in its line.
+    periods = [c["period"] for c in history]
     fig, ax = plt.subplots(figsize=(8, 3.2), dpi=150)
-    ax.plot([c["period"] for c in points], [c["fob_usd_t"] for c in points], marker="o", ms=3, label="FOB (exportateur)")
-    ax.plot([c["period"] for c in points], [c["cif_usd_t"] for c in points], marker="o", ms=3, label="CIF (importateur)")
-    if any(c["period"] == period for c in points):
+    ax.plot(periods, [c.get("fob_usd_t", math.nan) for c in history], marker="o", ms=3, label="FOB (exportateur)")
+    ax.plot(periods, [c.get("cif_usd_t", math.nan) for c in history], marker="o", ms=3, label="CIF (importateur)")
+    if period in periods:
         ax.axvline(period, color="#c62828", linestyle="--", linewidth=1)
     ax.set_ylabel("USD par tonne")
     ax.tick_params(axis="x", labelrotation=60, labelsize=7)
@@ -83,11 +108,7 @@ def build_pdf(event):
     para(5, f"{event['exporter']} vers {event['partner']} · HS {event['hs4']} · période {event['period']} · rapport {event['reportId']}")
     pdf.ln(2)
     pdf.set_font("DejaVu", "", 10)
-    para(
-        5,
-        f"Prix FOB {usd(a['fob_usd_t'])} USD/t, prix CIF {usd(a['cif_usd_t'])} USD/t, "
-        f"écart {gap_text(a.get('gap'))} ({STATUS_LABELS.get(a['status'], a['status'])}).",
-    )
+    para(5, figures(a, event["exporter"], event["partner"]))
     pdf.image(chart(event["history"], event["period"]), w=180)
 
     heading("Résumé")

@@ -30,7 +30,10 @@ client = AnthropicBedrock(aws_region=os.environ["AWS_REGION"])
 
 
 class Hypothesis(BaseModel):
-    cause: Literal["reacheminement", "conflit", "tarifs_sanctions", "erreur_declaration", "autre"]
+    cause: Literal[
+        "reacheminement", "conflit", "tarifs_sanctions", "erreur_declaration",
+        "absence_declaration", "decalage_temporel", "autre",
+    ]
     explication: str
     vraisemblance: Literal["faible", "moyenne", "elevee"]
 
@@ -50,6 +53,19 @@ comparée à l'importation déclarée par B depuis A (valeur CIF), en prix unita
 Une cellule est signalée si le prix FOB dépasse le prix CIF, ou si l'écart (CIF - FOB) / FOB dépasse 35 %, \
 car le fret et l'assurance ne l'expliquent normalement pas. Un écart absent (null) signifie que la valeur FOB \
 déclarée est nulle alors que la valeur CIF ne l'est pas : l'écart est alors infini.
+
+Pour un trimestre ou une année, chaque côté cumule tous les mois qu'il a déclarés, y compris ceux que \
+l'autre pays n'a pas déclarés : fob_months et cif_months donnent le nombre de mois de chaque côté. S'ils \
+diffèrent, une variation de prix entre les mois peut expliquer une partie de l'écart.
+
+Une cellule de statut anomaly_one_sided est un flux déclaré par un seul des deux pays sur la période : seuls \
+les champs du côté qui a déclaré sont présents (fob_* pour l'exportateur, cif_* pour l'importateur), et il n'y \
+a pas d'écart. Ce flux est une transaction légitime : explique pourquoi l'autre pays ne l'a pas déclaré. Causes typiques : \
+le pays a cessé de publier ses statistiques ou les tient confidentielles (absence_declaration ; regarde si \
+l'exportateur ne déclare rien non plus vers les autres partenaires de la même période), enregistrement à un mois \
+différent de part et d'autre, par exemple une cargaison expédiée en décembre et reçue en janvier \
+(decalage_temporel), pays d'origine ou de destination attribué différemment, notamment en cas de transit \
+(reacheminement), seuil de déclaration ou erreur de code produit ou de pays (erreur_declaration).
 
 Rédige en français, pour un lecteur métier. Appuie chaque hypothèse sur les chiffres fournis (historique \
 de la paire, autres partenaires sur la même période) et dis clairement quand les données ne permettent pas \
@@ -92,6 +108,9 @@ def handler(event, context):
     anomaly, history, peers = trade_context.select(cells, event["partner"], event["period"])
     if anomaly is None:
         raise ValueError(f"No cell for {event['reportId']}")
+    # The API only starts reports for anomalies (one-sided flows included); this guards direct starts.
+    if not anomaly["status"].startswith("anomaly"):
+        raise ValueError(f"{event['reportId']} is not an anomaly (status {anomaly['status']})")
 
     pages = wikipedia.fetch(event["exporter"], event["partner"], event["hs4"], event["period"])
     print(f"{len(pages)} Wikipedia page(s), {sum(len(p['text']) for p in pages)} characters")

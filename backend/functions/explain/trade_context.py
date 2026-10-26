@@ -19,11 +19,12 @@ def select(cells, partner, period):
     """Split the cells of one exporter, product and frequency into (anomaly, history, peers).
 
     history: the pair's last periods up to the flagged one, oldest first.
-    peers: the other partners in the same period, for comparison (one-sided flows have no price).
+    peers: the other partners in the same period, for comparison. One-sided peers stay: if the
+    exporter declared nothing towards anyone, the cause lies with the exporter, not with the pair.
     """
     cells = [plain(c) for c in cells]
     pair = sorted((c for c in cells if c["partner"] == partner), key=lambda c: c["period"])
     anomaly = next((c for c in pair if c["period"] == period), None)
     history = [c for c in pair if c["period"] <= period][-HISTORY_LENGTH:]
-    peers = [c for c in cells if c["period"] == period and c["partner"] != partner and c["status"] != "one_sided"]
+    peers = [c for c in cells if c["period"] == period and c["partner"] != partner]
     return anomaly, history, peers
