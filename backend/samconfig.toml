@@ -1,0 +1,24 @@
+# Deployment settings shared by the group. The stack name prefixes every resource name (see template.yaml).
+version = 0.1
+
+[default.global.parameters]
+stack_name = "group16-trade-anomaly"
+region = "us-east-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+parameter_overrides = "ComtradeKeyParameterName=\"group16-trade-anomaly/comtrade-key\" ModelId=\"global.anthropic.claude-haiku-5-5\" AllowedOrigins=\"http://localhost:5173\" IngestionSchedule=\"cron(0 6 ? * MON *)\""
+s3_prefix = "group16-trade-anomaly"
+image_repositories = []
+
+[default.sync.parameters]
+watch = true
+
+[default.logs.parameters]
+region = "us-east-1"
