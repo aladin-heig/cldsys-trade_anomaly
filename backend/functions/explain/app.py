@@ -8,14 +8,16 @@ about 400 KB) never travel between Step Functions states, whose payload is limit
 model's structured answer, the history used for the chart and the list of sources leave this function.
 
 Uses the Anthropic SDK's Bedrock client (SigV4 with the Lambda role, no API key) and a structured
-output, so the PDF step receives validated fields rather than free text to parse.
+output, so the PDF step receives validated fields rather than free text to parse. The client goes
+through InvokeModel with a cross-region inference profile (global.anthropic.claude-haiku-5-5):
+the Bedrock Messages endpoint (AnthropicBedrockMantle) answers 404 for Haiku 5.5 on our account.
 """
 import json
 import os
 from typing import Literal
 
 import boto3
-from anthropic import AnthropicBedrockMantle
+from anthropic import AnthropicBedrock
 from boto3.dynamodb.conditions import Key
 from pydantic import BaseModel
 
@@ -24,7 +26,7 @@ import wikipedia
 
 MODEL_ID = os.environ["MODEL_ID"]
 table = boto3.resource("dynamodb").Table(os.environ["GAPS_TABLE"])
-client = AnthropicBedrockMantle(aws_region=os.environ["AWS_REGION"])
+client = AnthropicBedrock(aws_region=os.environ["AWS_REGION"])
 
 
 class Hypothesis(BaseModel):

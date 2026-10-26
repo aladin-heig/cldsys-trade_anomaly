@@ -8,12 +8,12 @@ Description: >
 Parameters:
   ComtradeKeyParameterName:
     Type: String
-    Default: trade-anomaly/comtrade-key
+    Default: group16-trade-anomaly/comtrade-key
     Description: Name of the SecureString parameter holding the UN Comtrade key, without the leading slash.
   ModelId:
     Type: String
-    Default: anthropic.claude-haiku-5-5
-    Description: Claude model on Amazon Bedrock that writes the explanation.
+    Default: global.anthropic.claude-haiku-5-5
+    Description: Inference profile of the Claude model on Amazon Bedrock that writes the explanation.
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: http://localhost:5173
@@ -23,6 +23,8 @@ Parameters:
     Default: cron(0 6 ? * MON *)
     Description: When the weekly full reload runs (UTC). Default is every Monday at 06:00.
 
+# Every named resource starts with the stack name (group16-trade-anomaly, see samconfig.toml),
+# so the group that created it is visible in the console. Bucket names are global, hence the account id.
 Globals:
   Function:
     Runtime: python3.14
@@ -39,6 +41,7 @@ Resources:
   GapsTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: !Sub ${AWS::StackName}-gaps
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: pk, AttributeType: S }
@@ -50,6 +53,7 @@ Resources:
   RawBucket:
     Type: AWS::S3::Bucket
     Properties:
+      BucketName: !Sub ${AWS::StackName}-raw
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -59,6 +63,7 @@ Resources:
   ReportsBucket:
     Type: AWS::S3::Bucket
     Properties:
+      BucketName: !Sub ${AWS::StackName}-reports
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -69,6 +74,7 @@ Resources:
   IngestionFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-ingestion
       CodeUri: functions/ingestion/
       Description: UN Comtrade API -> raw copy in S3 -> gaps -> DynamoDB
       Timeout: 900
@@ -87,6 +93,7 @@ Resources:
         Weekly:
           Type: ScheduleV2
           Properties:
+            Name: !Sub ${AWS::StackName}-weekly-ingestion
             ScheduleExpression: !Ref IngestionSchedule
             Description: Reloads the whole history from UN Comtrade and recomputes every gap
 
@@ -96,6 +103,7 @@ Resources:
   ExplainFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-explain
       CodeUri: functions/explain/
       Description: Report step 1 - context from DynamoDB and Wikipedia, explanation by Claude on Amazon Bedrock
       Timeout: 300
@@ -106,13 +114,15 @@ Resources:
       Policies:
         - DynamoDBReadPolicy: { TableName: !Ref GapsTable }
         - Statement:
+            # "*": a global inference profile can route the request to the model in any region.
             - Effect: Allow
-              Action: bedrock-mantle:CreateInference
+              Action: bedrock:InvokeModel
               Resource: "*"
 
   PdfFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-pdf
       CodeUri: functions/pdf/
       Description: Report step 2 - chart and PDF stored in S3
       Timeout: 120
@@ -126,6 +136,7 @@ Resources:
   ReportStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
+      Name: !Sub ${AWS::StackName}-report
       Type: STANDARD # execution names are unique only for standard workflows
       DefinitionUri: statemachine/report.asl.json
       DefinitionSubstitutions:
@@ -139,6 +150,7 @@ Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
+      UserPoolName: !Sub ${AWS::StackName}-users
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       AdminCreateUserConfig:
@@ -150,6 +162,7 @@ Resources:
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
+      ClientName: !Sub ${AWS::StackName}-frontend
       UserPoolId: !Ref UserPool
       GenerateSecret: false
       ExplicitAuthFlows:
@@ -160,6 +173,7 @@ Resources:
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
+      Name: !Sub ${AWS::StackName}-api
       CorsConfiguration:
         AllowOrigins: !Ref AllowedOrigins
         AllowHeaders: [authorization, content-type]
@@ -177,6 +191,7 @@ Resources:
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-api
       CodeUri: functions/api/
       Description: Heatmap reads, report requests and report status
       Environment:
