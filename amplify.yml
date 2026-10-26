@@ -1,0 +1,23 @@
+# Amplify Hosting build settings. The repository also holds the backend, so the app is a monorepo
+# whose root is frontend/ (Amplify sets AMPLIFY_MONOREPO_APP_ROOT=frontend when "monorepo" is ticked).
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - nvm install 20
+            - nvm use 20
+            - npm ci
+        build:
+          commands:
+            # VITE_API_URL, VITE_USER_POOL_ID and VITE_USER_POOL_CLIENT_ID come from the app's environment variables.
+            - npm run build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*
