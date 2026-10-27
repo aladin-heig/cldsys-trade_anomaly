@@ -127,7 +127,7 @@ La réponse doit contenir `"count":1` et la valeur 22998881.93 (Argentine vers A
 
 ```bash
 aws ssm put-parameter \
-  --name /trade-anomaly/comtrade-key \
+  --name /group16-trade-anomaly/comtrade-key \
   --type SecureString \
   --value "<votre clé>" \
   --region us-east-1
@@ -151,7 +151,7 @@ Le plus simple est donc de faire cette première invocation vous-même, depuis l
 
 Le contexte externe du rapport vient de l'API publique de Wikipédia, qui ne demande ni clé ni inscription : il n'y a rien à préparer de ce côté.
 
-Le template appelle Claude par le point d'accès Messages de Bedrock, avec l'identifiant `anthropic.claude-haiku-5-5` et l'action IAM `bedrock-mantle:CreateInference`. Pour changer de modèle, il suffit de modifier le paramètre `ModelId` au déploiement. Un administrateur du compte peut restreindre l'accès aux modèles par des politiques IAM ou des Service Control Policies : sur un compte de cours, c'est une cause possible de refus (voir section 8).
+Le template appelle Claude par l'API InvokeModel de Bedrock, avec le profil d'inférence global `global.anthropic.claude-haiku-5-5` et l'action IAM `bedrock:InvokeModel`. Le profil global laisse Bedrock traiter la requête dans la région qui a de la capacité, sans surcoût ; le préfixe `us.` garderait le traitement aux États-Unis, pour 10 % de plus. Le nouveau point d'accès Messages de Bedrock (client `AnthropicBedrockMantle`, identifiant `anthropic.claude-haiku-5-5`) répond « The model does not exist » pour Haiku 5.5 sur notre compte, alors que le même modèle répond par InvokeModel : d'où ce choix. Pour changer de modèle, il suffit de modifier le paramètre `ModelId` au déploiement. Un administrateur du compte peut restreindre l'accès aux modèles par des politiques IAM ou des Service Control Policies : sur un compte de cours, c'est une cause possible de refus (voir section 8).
 
 ---
 
@@ -167,7 +167,7 @@ python -m pytest backend/tests -q
 
 Les tests ne font aucun appel réseau. Ils vérifient :
 
-- **la règle d'anomalie** ([test_gaps.py](backend/tests/test_gaps.py)) : les exemples de la slide 7 du sujet, le seuil de 35 % exclusif, les valeurs nulles (FOB nul, CIF nul, les deux), l'agrégation trimestrielle, les flux déclarés d'un seul côté, les quantités nulles ou absentes, et le fait que les lignes d'export et d'import ne sont jamais additionnées ;
+- **la règle d'anomalie** ([test_gaps.py](backend/tests/test_gaps.py)) : les exemples de la slide 7 du sujet, le seuil de 35 % exclusif, les valeurs nulles (FOB nul, CIF nul, les deux), l'agrégation trimestrielle (chaque côté cumule tous ses mois déclarés), les flux déclarés d'un seul côté (signalés, avec la valeur du pays qui a déclaré), les quantités nulles ou absentes, et le fait que les lignes d'export et d'import ne sont jamais additionnées ;
 - **la conversion des données de l'API Comtrade** en lignes équivalentes à celles du fichier Excel de DNEXT (codes ISO3, mois AAAA-MM, quantité en tonnes) ;
 - **le contexte du rapport** ([test_report_context.py](backend/tests/test_report_context.py)) : le choix de l'historique et des autres partenaires, la requête Wikipédia, le plafond de 400 000 caractères, et la poursuite du rapport quand Wikipédia ne répond pas (API simulée).
 
@@ -195,10 +195,10 @@ Réponses conseillées :
 
 | Question | Réponse |
 |---|---|
-| Stack Name | `trade-anomaly` |
-| AWS Region | `us-east-1` |
-| Parameter ComtradeKeyParameterName | Entrée (valeur par défaut `trade-anomaly/comtrade-key`, sans la barre initiale) |
-| Parameter ModelId | Entrée (`anthropic.claude-haiku-5-5`) |
+| Stack Name | Entrée (`group16-trade-anomaly`, lu dans `samconfig.toml`) |
+| AWS Region | Entrée (`us-east-1`) |
+| Parameter ComtradeKeyParameterName | Entrée (valeur par défaut `group16-trade-anomaly/comtrade-key`, le nom de l'étape 3.1 sans la barre initiale) |
+| Parameter ModelId | Entrée (`global.anthropic.claude-haiku-5-5`) |
 | Parameter AllowedOrigins | Entrée pour l'instant (`http://localhost:5173`), à compléter à l'étape 6.4 |
 | Parameter IngestionSchedule | Entrée (chaque lundi à 06:00 UTC) |
 | Confirm changes before deploy | `Y` |
@@ -211,10 +211,12 @@ SAM affiche la liste des ressources à créer ; confirmez avec `y`. Le déploiem
 
 **Versionnez `backend/samconfig.toml`** : il contient les réponses ci-dessus, et permet à chacun de redéployer avec un simple `sam deploy`.
 
+**Nommage.** Tout ce que le groupe crée commence par `group16-`, pour qu'on le reconnaisse dans la console d'un compte partagé. Le template nomme chaque ressource à partir du nom de la pile : gardez donc `group16-trade-anomaly`. Les rôles IAM générés par SAM (`group16-trade-anomaly-IngestionFunctionRole-…`) suivent la même règle. Seule exception : le bucket `aws-sam-cli-managed-default-…`, que SAM crée lui-même pour y déposer le code des fonctions.
+
 ### 5.3 Récupérer les sorties
 
 ```bash
-sam list stack-outputs --stack-name trade-anomaly
+sam list stack-outputs --stack-name group16-trade-anomaly
 ```
 
 | Sortie | Usage |
@@ -228,23 +230,23 @@ sam list stack-outputs --stack-name trade-anomaly
 Pour la suite, gardez-les dans des variables :
 
 ```bash
-out() { aws cloudformation describe-stacks --stack-name trade-anomaly \
+out() { aws cloudformation describe-stacks --stack-name group16-trade-anomaly \
   --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 API=$(out ApiUrl); POOL=$(out UserPoolId); CLIENT=$(out UserPoolClientId); INGEST=$(out IngestionFunctionName)
 ```
 
 ### 5.4 Ce que SAM a créé
 
-| Ressource | Rôle |
-|---|---|
-| Table DynamoDB | Écarts précalculés (`pk` = exportateur#produit#fréquence, `sk` = période#partenaire) et poids des partenaires par année |
-| Bucket S3 « raw » | Réponse brute de l'API, supprimée dès que les écarts sont écrits |
-| Bucket S3 « reports » | Rapports PDF, téléchargés par lien signé valable 15 minutes |
-| Lambda d'ingestion + planification EventBridge Scheduler | Rechargement complet chaque semaine (2019 à l'année en cours) et recalcul de tous les écarts |
-| Machine à états Step Functions (standard) | Deux étapes : une Lambda réunit le contexte (historique, autres partenaires, trois pages Wikipédia) et fait rédiger l'explication par Claude, puis une Lambda produit le PDF ; le nom d'exécution est l'identifiant du rapport |
-| Lambda de l'API | Lecture de la heatmap, demande de rapport, statut du rapport |
-| API HTTP API Gateway | Trois routes, toutes protégées par un jeton Cognito |
-| Groupe d'utilisateurs Cognito | Comptes créés par un administrateur uniquement |
+| Ressource | Nom | Rôle |
+|---|---|---|
+| Table DynamoDB | `group16-trade-anomaly-gaps` | Écarts précalculés (`pk` = exportateur#produit#fréquence, `sk` = période#partenaire) et poids des partenaires par année |
+| Bucket S3 « raw » | `group16-trade-anomaly-raw-<compte>` | Réponse brute de l'API, supprimée dès que les écarts sont écrits |
+| Bucket S3 « reports » | `group16-trade-anomaly-reports-<compte>` | Rapports PDF, téléchargés par lien signé valable 15 minutes |
+| Lambda d'ingestion + planification EventBridge Scheduler | `group16-trade-anomaly-ingestion`, `group16-trade-anomaly-weekly-ingestion` | Rechargement complet chaque semaine (2019 à l'année en cours) et recalcul de tous les écarts |
+| Machine à états Step Functions (standard) et ses deux Lambda | `group16-trade-anomaly-report`, `group16-trade-anomaly-explain`, `group16-trade-anomaly-pdf` | Deux étapes : une Lambda réunit le contexte (historique, autres partenaires, trois pages Wikipédia) et fait rédiger l'explication par Claude, puis une Lambda produit le PDF ; le nom d'exécution est l'identifiant du rapport |
+| Lambda de l'API | `group16-trade-anomaly-api` | Lecture de la heatmap, demande de rapport, statut du rapport |
+| API HTTP API Gateway | `group16-trade-anomaly-api` | Trois routes, toutes protégées par un jeton Cognito |
+| Groupe d'utilisateurs Cognito et son client | `group16-trade-anomaly-users`, `group16-trade-anomaly-frontend` | Comptes créés par un administrateur uniquement |
 
 ---
 
@@ -263,7 +265,7 @@ aws lambda invoke --function-name "$INGEST" --invocation-type Event \
 Suivi en direct :
 
 ```bash
-sam logs --stack-name trade-anomaly -n IngestionFunction --tail
+sam logs --stack-name group16-trade-anomaly -n IngestionFunction --tail
 ```
 
 La dernière ligne attendue ressemble à `{"years": [2019, …, 2026], "rows": …, "cells": …, "anomalies": …}`. Avec le périmètre de DNEXT, le calcul produit environ 230 000 cellules.
@@ -298,15 +300,15 @@ Heatmap du maïs américain, par trimestre :
 curl -s -H "Authorization: Bearer $TOKEN" "$API/anomalies?exporter=USA&hs4=1005&freq=Q" | head -c 600
 ```
 
-Demander un rapport, puis relancer la seconde commande jusqu'à obtenir le statut `generated` :
+Demander le rapport d'une cellule rouge (blé américain vers le Canada, mars 2025), puis relancer la seconde commande jusqu'à obtenir le statut `generated`. Seule une anomalie a un rapport, y compris un flux déclaré d'un seul côté (cellule rouge hachurée) : pour une cellule cohérente, l'API répond 400, et 404 pour une cellule absente.
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
   -d @events/report-request.json "$API/reports"
-curl -s -H "Authorization: Bearer $TOKEN" "$API/reports/USA-MEX-1005-Q-2024-Q3"
+curl -s -H "Authorization: Bearer $TOKEN" "$API/reports/USA-CAN-1001-M-2025-03"
 ```
 
-Une fois le statut à `generated`, le champ `downloadUrl` ouvre le PDF dans un navigateur. Sa section « Sources » liste les pages Wikipédia consultées, et les numéros entre crochets du texte y renvoient. Le journal de l'étape d'explication indique combien de pages ont été lues (`sam logs --stack-name trade-anomaly -n ExplainFunction`). Un statut `failed` renvoie l'erreur et sa cause ; le détail de chaque étape se lit dans la console Step Functions, où l'exécution peut aussi être relancée depuis l'étape en échec (bouton **Redrive**).
+Une fois le statut à `generated`, le champ `downloadUrl` ouvre le PDF dans un navigateur. Sa section « Sources » liste les pages Wikipédia consultées, et les numéros entre crochets du texte y renvoient. Le journal de l'étape d'explication indique combien de pages ont été lues (`sam logs --stack-name group16-trade-anomaly -n ExplainFunction`). Un statut `failed` renvoie l'erreur et sa cause ; le détail de chaque étape se lit dans la console Step Functions, où l'exécution peut aussi être relancée depuis l'étape en échec (bouton **Redrive**).
 
 ### 6.4 Front-end
 
@@ -331,7 +333,7 @@ Le dépôt se connecte tel quel à Amplify : le fichier `amplify.yml` à la raci
 
 1. Pousser le dépôt sur GitHub.
 2. Console AWS, région us-east-1, **AWS Amplify**, **Create new app**, source **GitHub**, autoriser l'accès au dépôt.
-3. Choisir le dépôt et la branche `main`, cocher **My app is a monorepo** et indiquer `frontend` comme dossier racine. Amplify détecte `amplify.yml` ; ne pas modifier les paramètres de build proposés.
+3. Choisir le dépôt et la branche `main`, cocher **My app is a monorepo** et indiquer `frontend` comme dossier racine. Amplify détecte `amplify.yml` ; ne pas modifier les paramètres de build proposés. Dans **App name**, remplacer le nom du dépôt par `group16-trade-anomaly-frontend`.
 4. Dans **Advanced settings**, **Environment variables**, ajouter les sorties de la section 5.3 :
 
 | Variable | Valeur |
@@ -352,7 +354,7 @@ Chaque `git push` sur `main` redéploie ensuite le front-end automatiquement. Le
 
 ### 6.5 Alerte de coût (conseillée)
 
-Console AWS, **Billing and Cost Management**, **Budgets**, **Create budget**, modèle **Monthly cost budget**, avec un montant bas (par exemple 10 USD) et votre adresse e-mail. Vous serez prévenus avant toute surprise, notamment sur les appels au modèle.
+Console AWS, **Billing and Cost Management**, **Budgets**, **Create budget**, modèle **Monthly cost budget**, nommé `group16-trade-anomaly-budget`, avec un montant bas (par exemple 10 USD) et votre adresse e-mail. Vous serez prévenus avant toute surprise, notamment sur les appels au modèle.
 
 ---
 
@@ -361,9 +363,9 @@ Console AWS, **Billing and Cost Management**, **Budgets**, **Create budget**, mo
 | Action | Commande |
 |---|---|
 | Redéployer après une modification | `cd backend && sam build && sam deploy` |
-| Synchroniser en continu pendant le développement | `sam sync --stack-name trade-anomaly --watch` (à ne pas utiliser sur l'environnement de démonstration) |
+| Synchroniser en continu pendant le développement | `sam sync --stack-name group16-trade-anomaly --watch` (à ne pas utiliser sur l'environnement de démonstration) |
 | Relancer le recalcul complet sans attendre lundi | `aws lambda invoke --function-name "$INGEST" --invocation-type Event --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout` (pas pendant que le recalcul du lundi tourne) |
-| Tout supprimer | Vider les deux buckets, puis `sam delete --stack-name trade-anomaly` |
+| Tout supprimer | Vider les deux buckets, puis `sam delete --stack-name group16-trade-anomaly` |
 
 Vider un bucket : `aws s3 rm "s3://$(out ReportsBucketName)" --recursive`, et de même pour `RawBucketName`. CloudFormation refuse de supprimer un bucket qui contient encore des fichiers. Le paramètre de la clé Comtrade et l'application Amplify, créés à la main, se suppriment aussi à la main.
 
@@ -379,10 +381,13 @@ Vider un bucket : `aws s3 rm "s3://$(out ReportsBucketName)" --recursive`, et de
 | Ingestion : erreur 429 répétée | Quota de 500 appels par jour atteint | Attendre le lendemain ; un chargement complet n'en consomme que 16 |
 | Ingestion : `Task timed out after 900 seconds` | Le recalcul complet dépasse 15 minutes | Découper la récupération par année (voir 6.1) |
 | Rapport `failed` à l'étape Explain avec `AccessDenied` | Modèle jamais invoqué depuis la console (formulaire Anthropic ou activation Marketplace en attente), ou accès restreint par une politique IAM ou SCP du compte | Refaire 3.2 avec votre utilisateur ; sur un compte de cours, demander à l'administrateur si Bedrock est autorisé |
+| Rapport `failed` à l'étape Explain avec `NotFoundError` « The model 'anthropic.claude-haiku-5-5' does not exist » | Ancien identifiant, appelé par le point d'accès Messages (Mantle), qui ne sert pas Haiku 5.5 sur ce compte | Redéployer avec `ModelId=global.anthropic.claude-haiku-5-5` (valeur par défaut du template et de `samconfig.toml`) |
+| Rapport `failed` à l'étape Explain avec `ValidationException` « on-demand throughput isn't supported » | Identifiant du modèle passé sans préfixe de profil d'inférence | Utiliser `global.` ou `us.` devant l'identifiant |
+| Rapport `failed` avec `… is not an anomaly` | Workflow lancé directement (console, CLI) sur une cellule cohérente ; l'API refuse déjà ces demandes | Choisir une cellule rouge, par exemple celle de `events/report-request.json` |
 | Rapport `failed` avec `No cell for …` | Cellule absente de DynamoDB (période ou partenaire erroné) | Vérifier la requête avec `GET /anomalies` |
 | PDF : « Aucune page Wikipédia n'a pu être consultée » | Wikipédia injoignable, ou limite de débit des appels anonymes (erreur 429) atteinte malgré trois tentatives | Rien à corriger : le rapport repose alors sur les seules données. Relancer la demande plus tard pour obtenir les sources |
 | API : `401 Unauthorized` | Jeton expiré (1 heure) ou d'un autre groupe d'utilisateurs | Refaire `initiate-auth` |
 | Navigateur : erreur CORS | Domaine du front-end absent de `AllowedOrigins` | Voir 6.4, étape 6 |
 | Amplify : page blanche après déploiement | Variables `VITE_*` absentes au moment du build | Les ajouter (6.4, étape 4) puis redéployer |
 | Front-end : « User does not exist » | Compte non créé, ou créé dans un autre groupe d'utilisateurs | Refaire 6.2 avec le `UserPoolId` de la pile |
-| Comment voir les journaux d'une fonction | — | `sam logs --stack-name trade-anomaly -n <ApiFunction / ExplainFunction / …> --tail` |
+| Comment voir les journaux d'une fonction | — | `sam logs --stack-name group16-trade-anomaly -n <ApiFunction / ExplainFunction / …> --tail` |
