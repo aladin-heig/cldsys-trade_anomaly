@@ -32,7 +32,7 @@
 \section*{Architecture}
 
 \begin{center}
-\includegraphics[width=\textwidth]{architecture.pdf}
+\includegraphics[width=\textwidth]{../livrables/assets/architecture_diagram_aws.png}
 \end{center}
 
 \vspace{-2pt}
@@ -51,7 +51,7 @@
 \section*{Deployment}
 The whole backend is described as Infrastructure as Code in a single \textbf{AWS SAM} template (\texttt{backend/template.yaml}) and deployed in \texttt{us-east-1} as the CloudFormation stack \texttt{group16-trade-anomaly}; the front-end is deployed separately on Amplify. The solution is fully serverless and billed per use, since the load is low and irregular (weekly data, on-demand reports).
 \begin{enumerate}
-  \item \textbf{Functions (FaaS):} four AWS Lambda functions in Python 3.14 -- \textit{Ingestion} (900\,s, 2\,GB; a measured full reload took 370\,s, within the 15-minute Lambda limit), \textit{API} (30\,s), \textit{Explain} (300\,s, 1\,GB), \textit{PDF} (120\,s, 1\,GB).
+  \item \textbf{Functions (FaaS):} four AWS Lambda functions in Python 3.14, with their configured timeout and memory -- \textit{Ingestion} (900\,s, 2\,GB), \textit{API} (30\,s, 512\,MB), \textit{Explain} (300\,s, 1\,GB), \textit{PDF} (120\,s, 1\,GB). A measured full ingestion run took 370\,s, well within its timeout and the 15-minute Lambda limit.
   \item \textbf{Orchestration:} AWS Step Functions \emph{standard} state machine (\texttt{Explain} $\rightarrow$ \texttt{BuildPdf}), defined in Amazon States Language; only a few KB pass between steps, well below the 256\,KB limit.
   \item \textbf{Database:} Amazon DynamoDB, on-demand capacity, composite key \texttt{exporter\#hs4\#freq} / \texttt{period\#partner}.
   \item \textbf{Object storage:} two Amazon S3 buckets with all public access blocked (raw Comtrade data, PDF reports).
